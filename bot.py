@@ -36,7 +36,7 @@ def load_subscribers():
     if os.path.exists(SUBSCRIBERS_FILE):
         with open(SUBSCRIBERS_FILE) as f:
             return set(json.load(f))
-    return set()
+    return {6797169}
 
 def save_subscribers(subs):
     with open(SUBSCRIBERS_FILE, "w") as f:
@@ -87,7 +87,12 @@ def fetch_news():
                 results[category].append((title, link))
     return results
 
-async def send_to(bot, chat_id, all_news, total):
+async def send_news_to(bot, chat_id):
+    all_news = fetch_news()
+    total = sum(len(v) for v in all_news.values())
+    if total == 0:
+        await bot.send_message(chat_id=chat_id, text="Новостей о финансировании за сегодня не найдено.")
+        return
     header = f"📡 *Дайджест финансирования* — {total} новостей\n\n"
     message = header
     for category, items in all_news.items():
@@ -105,48 +110,43 @@ async def send_to(bot, chat_id, all_news, total):
     if message.strip():
         await bot.send_message(chat_id=chat_id, text=message, parse_mode="Markdown", disable_web_page_preview=True)
 
-async def send_news():
-    bot = Bot(token=TOKEN)
-    all_news = fetch_news()
-    total = sum(len(v) for v in all_news.values())
+async def send_to_all(context: ContextTypes.DEFAULT_TYPE):
     subscribers = load_subscribers()
-    if not subscribers:
-        return
     for chat_id in subscribers:
-        try:
-            if total == 0:
-                await bot.send_message(chat_id=chat_id, text="Новостей о финансировании за сегодня не найдено.")
-            else:
-                await send_to(bot, chat_id, all_news, total)
-        except Exception as e:
-            print(f"Ошибка для {chat_id}: {e}")
+        await send_news_to(context.bot, chat_id)
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    subs = load_subscribers()
-    subs.add(update.effective_chat.id)
-    save_subscribers(subs)
-    await update.message.reply_text("✅ Ты подписан на ежедневный дайджест финансирования в 9:00. Для отписки — /stop")
+    chat_id = update.effective_chat.id
+    subscribers = load_subscribers()
+    subscribers.add(chat_id)
+    save_subscribers(subscribers)
+    await update.message.reply_text("✅ Ты подписан на дайджест финансирования в wearable/healthtech. Новости приходят каждый день в 9:00. Команда /news — получить сейчас.")
 
 async def stop(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    subs = load_subscribers()
-    subs.discard(update.effective_chat.id)
-    save_subscribers(subs)
+    chat_id = update.effective_chat.id
+    subscribers = load_subscribers()
+    subscribers.discard(chat_id)
+    save_subscribers(subscribers)
     await update.message.reply_text("❌ Ты отписан от дайджеста.")
 
-async def main():
+async def news_now(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    chat_id = update.effective_chat.id
+    await update.message.reply_text("Собираю новости, подожди...")
+    await send_news_to(context.bot, chat_id)
+
+def main():
     app = Application.builder().token(TOKEN).build()
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("stop", stop))
+    app.add_handler(CommandHandler("news", news_now))
 
-    scheduler = AsyncIOScheduler()
-    scheduler.add_job(send_news, "cron", hour=9, minute=0)
-    scheduler.start()
+    app.job_queue.run_daily(send_to_all, time=__import__('datetime').time(9, 0))
 
     print("Бот запущен.")
-    await app.run_polling()
+    app.run_polling()
 
 if __name__ == "__main__":
     if "--test" in sys.argv:
-        asyncio.run(send_news())
+        asyncio.run(send_news_to(Bot(TOKEN), 6797169))
     else:
-        asyncio.run(main())
+        main()
