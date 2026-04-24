@@ -3,6 +3,7 @@ import asyncio
 import sys
 import json
 import os
+import time as time_module
 from datetime import time
 from telegram import Bot, Update
 from telegram.ext import Application, CommandHandler, ContextTypes
@@ -27,7 +28,6 @@ CATEGORIES = {
 
 SKIP = ["apple", "samsung", "fitbit", "google", "microsoft", "anthropic", "amazon", "meta"]
 FUNDING = ["fund", "raise", "raised", "million", "invest", "series", "seed", "round", "capital"]
-seen = set()
 
 def load_subs():
     if os.path.exists(SUBSCRIBERS_FILE):
@@ -41,19 +41,25 @@ def save_subs(s):
 
 def fetch():
     results = {cat: [] for cat in CATEGORIES}
+    seen_links = set()
     for cat, feeds in CATEGORIES.items():
         for url in feeds:
             feed = feedparser.parse(url)
             for e in feed.entries:
                 t = e.get("title", "")
                 l = e.get("link", "")
-                if l in seen:
+                if l in seen_links:
                     continue
                 if any(c in t.lower() for c in SKIP):
                     continue
                 if not any(w in t.lower() for w in FUNDING):
                     continue
-                seen.add(l)
+                published = e.get("published_parsed")
+                if published:
+                    age_days = (time_module.time() - time_module.mktime(published)) / 86400
+                    if age_days > 30:
+                        continue
+                seen_links.add(l)
                 results[cat].append((t, l))
     return results
 
